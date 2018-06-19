@@ -11,3 +11,4 @@ Distributed manager based on golang
 目前支持TCC一致模型、补偿模型、不可靠消息模型、可靠消息模型
 
 ##架构图如下
+![](https://github.com/developersPHP/Go-DTM/blob/master/source/%E7%B3%BB%E7%BB%9F%E6%9E%B6%E6%9E%84%E8%AE%BE%E8%AE%A1.png)
