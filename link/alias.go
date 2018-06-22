@@ -2,9 +2,11 @@ package link
 
 import (
 	"Go-DMT/Go-DTM/link/dblink"
+	"Go-DMT/Go-DTM/link/rabbitmq-dirver"
 	"database/sql"
 	"github.com/Sirupsen/logrus"
 	"github.com/astaxie/beego/logs"
+	"github.com/streadway/amqp"
 	"sync"
 	"time"
 )
@@ -14,8 +16,8 @@ type DriverType int
 const (
 	_ DriverType = iota
 	DRMySQL
+	RabbitMQ
 	DBRedis
-	MessRabbit
 )
 
 //写一个driver的模型，用户获取不同驱动
@@ -36,7 +38,8 @@ func (d driver) Name() string {
 var (
 	dataBaseCache = &_dbCache{cache: make(map[string]*alias)}
 	drivers       = map[string]DriverType{
-		"mysql": DRMySQL,
+		"mysql":    DRMySQL,
+		"rabbitmq": RabbitMQ,
 	}
 	dbBasers = map[DriverType]dbBase{
 		DRMySQL: dblink.NewdbBaseMysql(),
@@ -79,7 +82,7 @@ type alias struct {
 	DataSource   string
 	MaxIdleConns int
 	MaxOpenConns int
-	DB           *sql.DB
+	DB           interface{}
 	DbBaser      dbBase
 	TZ           *time.Location
 	Engine       string
@@ -104,7 +107,7 @@ func defaultDZ(a *alias) {
 
 //TODO 每个存储介质的连接都需要经过三个函数，addAliasWithDB,AddAliasWithDB,RegisterDataBase。
 
-func addAliasWithDB(aliasName string, driverName string, db *sql.DB) (al *alias) {
+func addAliasWithDB(aliasName string, driverName string, db interface{}) (al *alias) {
 	al = new(alias)
 	al.Name = aliasName
 	al.DB = db
@@ -119,14 +122,26 @@ func addAliasWithDB(aliasName string, driverName string, db *sql.DB) (al *alias)
 	return
 }
 
-func AddAliasWithDB(aliasName string, driverName string, db *sql.DB) (al *alias) {
+func AddAliasWithDB(aliasName string, driverName string, db interface{}) (al *alias) {
 	al = addAliasWithDB(aliasName, driverName, db)
 	return
 }
 
 //TODO 具体实现连接
 func RegisterDataBase(aliasName string, driverName string, dbRoute string, params ...int) error {
-	db, err := sql.Open(driverName, dbRoute)
+	//TODO 由于database的sql连接池没办法满足rabbitmq的连接使用，只能在这里做个分支，可以考虑一下有什么更好设计模式方案
+	var (
+		err error
+		db  interface{}
+	)
+
+	if driverName == "rabbitmq" {
+		db, err = rabbitmq_dirver.Open(driverName, dbRoute)
+	} else {
+		db, err = sql.Open(driverName, dbRoute)
+	}
+	//db, err := sql.Open(driverName, dbRoute)
+
 	if err != nil {
 		logs.Debug("connect db fail")
 	}
@@ -147,6 +162,7 @@ func RegisterDataBase(aliasName string, driverName string, dbRoute string, param
 
 		}
 	}
+	return nil
 }
 
 func RegisterDriver(driverName string, typ DriverType) error {
