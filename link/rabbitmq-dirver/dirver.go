@@ -10,7 +10,7 @@ import (
 
 type RabbitMQDriver struct{}
 
-func Open(drivename string, dsn string) (*channelPool, error) {
+func Open(drivename string, dsn string) (*ChannelPool, error) {
 	//dsn格式如下"amqp://admin:123456@47.106.120.121:5672/admin"
 	factory := func() (*amqp.Connection, error) { return amqp.Dial(dsn) }
 	conn, err := NewChannelPool(3, 100, factory)

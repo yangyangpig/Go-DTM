@@ -1,13 +1,14 @@
 package messagelink
 
 import (
+	"Go-DMT/Go-DTM/link"
 	"github.com/streadway/amqp"
 	"github.com/uber/jaeger-client-go/crossdock/log"
 	"sync"
 )
 
 type RabbitMQ struct {
-	conn *amqp.Connection
+	Conn *amqp.Connection
 	ch   *amqp.Channel
 	q    amqp.Queue
 }
@@ -18,10 +19,11 @@ var (
 )
 
 //单例模式，减少结构体声明
-func NewRabbitMQFactory(c *amqp.Connection) *RabbitMQ {
+func NewRabbitMQFactory() *RabbitMQ {
 	once.Do(func() {
 		obj = new(RabbitMQ)
-		obj.conn = c
+		c, _ := link.Alias.RB.Get(nil)
+		obj.Conn = c.Conn
 	})
 	return obj
 }
@@ -32,7 +34,7 @@ func FailError(err error, msg string) {
 }
 
 func (this *RabbitMQ) ChoseChannel() *RabbitMQ {
-	ch, err := this.conn.Channel()
+	ch, err := this.Conn.Channel()
 	this.ch = ch
 	FailError(err, "get channel failed")
 	return this

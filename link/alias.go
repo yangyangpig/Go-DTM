@@ -2,6 +2,7 @@ package link
 
 import (
 	"Go-DMT/Go-DTM/link/dblink"
+	"Go-DMT/Go-DTM/link/messagelink"
 	"Go-DMT/Go-DTM/link/rabbitmq-dirver"
 	"database/sql"
 	"github.com/Sirupsen/logrus"
@@ -36,25 +37,26 @@ func (d driver) Name() string {
 //var _ Driver = new(driver)
 
 var (
-	dataBaseCache = &_dbCache{cache: make(map[string]*alias)}
+	dataBaseCache = &_dbCache{cache: make(map[string]*Alias)}
 	drivers       = map[string]DriverType{
 		"mysql":    DRMySQL,
 		"rabbitmq": RabbitMQ,
 	}
 	dbBasers = map[DriverType]dbBase{
 		DRMySQL: dblink.NewdbBaseMysql(),
-		//TODO rabbitMQ的操作类
 
+		//TODO rabbitMQ的操作类
+		RabbitMQ: messagelink.NewRabbitMQFactory().Conn,
 	}
 )
 
 //主要用于操作alias的缓存
 type _dbCache struct {
 	mu    sync.Mutex
-	cache map[string]*alias
+	cache map[string]*Alias
 }
 
-func (ac *_dbCache) get(name string) (al *alias, ok error) {
+func (ac *_dbCache) get(name string) (al *Alias, ok error) {
 	ac.mu.Lock()
 	defer ac.mu.Unlock()
 	al, ok = ac.cache[name]
@@ -62,7 +64,7 @@ func (ac *_dbCache) get(name string) (al *alias, ok error) {
 }
 
 //TODO add()
-func (ac *_dbCache) add(name string, al *alias) (added bool) {
+func (ac *_dbCache) add(name string, al *Alias) (added bool) {
 	ac.mu.Lock()
 	defer ac.mu.Unlock()
 	if _, ok := ac.cache[name]; !ok {
@@ -75,14 +77,15 @@ func (ac *_dbCache) add(name string, al *alias) (added bool) {
 //TODO get default
 
 //TODO 可能会根据rabbitMQ去增加一些特定的选项
-type alias struct {
+type Alias struct {
 	Name         string
 	Driver       DriverType
 	DriverName   string
 	DataSource   string
 	MaxIdleConns int
 	MaxOpenConns int
-	DB           interface{}
+	DB           *sql.DB
+	RB           *rabbitmq_dirver.ChannelPool
 	DbBaser      dbBase
 	TZ           *time.Location
 	Engine       string
@@ -90,7 +93,7 @@ type alias struct {
 
 //TODO设置数据库的时间，如果没有设置，默认用系统时间
 
-func defaultDZ(a *alias) {
+func defaultDZ(a *Alias) {
 	a.TZ = time.Local
 
 	switch a.Driver {
@@ -107,8 +110,8 @@ func defaultDZ(a *alias) {
 
 //TODO 每个存储介质的连接都需要经过三个函数，addAliasWithDB,AddAliasWithDB,RegisterDataBase。
 
-func addAliasWithDB(aliasName string, driverName string, db interface{}) (al *alias) {
-	al = new(alias)
+func addAliasWithDB(aliasName string, driverName string, db *sql.DB, rb *rabbitmq_dirver.ChannelPool) (al *Alias) {
+	al = new(Alias)
 	al.Name = aliasName
 	al.DB = db
 
@@ -122,8 +125,8 @@ func addAliasWithDB(aliasName string, driverName string, db interface{}) (al *al
 	return
 }
 
-func AddAliasWithDB(aliasName string, driverName string, db interface{}) (al *alias) {
-	al = addAliasWithDB(aliasName, driverName, db)
+func AddAliasWithDB(aliasName string, driverName string, db *sql.DB, rb *rabbitmq_dirver.ChannelPool) (al *Alias) {
+	al = addAliasWithDB(aliasName, driverName, db, rb)
 	return
 }
 
@@ -132,11 +135,12 @@ func RegisterDataBase(aliasName string, driverName string, dbRoute string, param
 	//TODO 由于database的sql连接池没办法满足rabbitmq的连接使用，只能在这里做个分支，可以考虑一下有什么更好设计模式方案
 	var (
 		err error
-		db  interface{}
+		db  *sql.DB
+		rb  *rabbitmq_dirver.ChannelPool
 	)
 
 	if driverName == "rabbitmq" {
-		db, err = rabbitmq_dirver.Open(driverName, dbRoute)
+		rb, err = rabbitmq_dirver.Open(driverName, dbRoute)
 	} else {
 		db, err = sql.Open(driverName, dbRoute)
 	}
@@ -146,7 +150,7 @@ func RegisterDataBase(aliasName string, driverName string, dbRoute string, param
 		logs.Debug("connect db fail")
 	}
 
-	al := AddAliasWithDB(aliasName, driverName, db)
+	al := AddAliasWithDB(aliasName, driverName, db, rb)
 
 	al.DataSource = dbRoute
 

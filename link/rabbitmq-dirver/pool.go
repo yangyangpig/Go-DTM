@@ -14,7 +14,7 @@ var (
 type PoolConn struct {
 	Conn     *amqp.Connection
 	mu       sync.RWMutex
-	c        *channelPool
+	c        *ChannelPool
 	unsuable bool
 }
 
@@ -39,24 +39,24 @@ func (p *PoolConn) MarkUnusable() {
 	p.mu.Unlock()
 }
 
-func (c *channelPool) WarpConn(conn *amqp.Connection) *PoolConn {
+func (c *ChannelPool) WarpConn(conn *amqp.Connection) *PoolConn {
 	p := &PoolConn{c: c}
 	p.Conn = conn
 	return p
 }
 
 type Factory func() (*amqp.Connection, error)
-type channelPool struct {
+type ChannelPool struct {
 	mu      sync.RWMutex
-	conns   chan *amqp.Connection
+	Conns   chan *amqp.Connection
 	factory Factory
 }
 
-func NewChannelPool(initialCap, maxCap int, factory Factory) (*channelPool, error) {
+func NewChannelPool(initialCap, maxCap int, factory Factory) (*ChannelPool, error) {
 	if initialCap < 0 || maxCap < 0 || initialCap > maxCap {
 		return nil, errors.New("invalid capacity settings")
 	}
-	c := &channelPool{conns: make(chan *amqp.Connection, maxCap), factory: factory}
+	c := &ChannelPool{Conns: make(chan *amqp.Connection, maxCap), factory: factory}
 	for i := 0; i < initialCap; i++ {
 		conn, err := factory()
 		fmt.Println("创建的句柄", conn)
@@ -65,16 +65,16 @@ func NewChannelPool(initialCap, maxCap int, factory Factory) (*channelPool, erro
 			return nil, fmt.Errorf("factory is not able to fill the pool:%s", err)
 		}
 		//这里是往池子里塞连接
-		c.conns <- conn
+		c.Conns <- conn
 	}
 	fmt.Println("创建池子", *c)
 	return c, nil
 }
 
-func (c *channelPool) Close() {
+func (c *ChannelPool) Close() {
 	c.mu.Lock()
-	conns := c.conns
-	c.conns = nil
+	conns := c.Conns
+	c.Conns = nil
 	c.factory = nil
 	c.mu.Unlock()
 
@@ -87,7 +87,7 @@ func (c *channelPool) Close() {
 	}
 
 }
-func (c *channelPool) Get() (*PoolConn, error) {
+func (c *ChannelPool) Get() (*PoolConn, error) {
 	conns, factory := c.getConnsAndFactory()
 	//如果获取到的连接池为空，则返回错误
 	if conns == nil {
@@ -109,7 +109,7 @@ func (c *channelPool) Get() (*PoolConn, error) {
 	}
 }
 
-func (c *channelPool) Put(conn *amqp.Connection) error {
+func (c *ChannelPool) Put(conn *amqp.Connection) error {
 	if conn == nil {
 		return errors.New("connection is nil,rejecting")
 	}
@@ -118,11 +118,11 @@ func (c *channelPool) Put(conn *amqp.Connection) error {
 	defer c.mu.Unlock()
 
 	//池子为空，池子没有初始化，把连接关闭
-	if c.conns == nil {
+	if c.Conns == nil {
 		return conn.Close()
 	}
 	select {
-	case c.conns <- conn:
+	case c.Conns <- conn:
 		return nil
 	default:
 		//池子满了，会走这里，把连接关闭
@@ -130,15 +130,15 @@ func (c *channelPool) Put(conn *amqp.Connection) error {
 	}
 }
 
-func (c *channelPool) getConnsAndFactory() (chan *amqp.Connection, Factory) {
+func (c *ChannelPool) getConnsAndFactory() (chan *amqp.Connection, Factory) {
 	c.mu.Lock()
-	conn := c.conns
+	conn := c.Conns
 	factory := c.factory
 	c.mu.Unlock()
 	return conn, factory
 }
 
-func (c *channelPool) Len() int {
+func (c *ChannelPool) Len() int {
 	conns, _ := c.getConnsAndFactory()
 	return len(conns)
 }
