@@ -1,13 +1,15 @@
 package link
 
 import (
+	"Go-DMT/Go-DTM/link/cachelink"
 	"Go-DMT/Go-DTM/link/dblink"
 	"Go-DMT/Go-DTM/link/messagelink"
 	"Go-DMT/Go-DTM/link/rabbitmq-dirver"
+	"Go-DMT/Go-DTM/link/redis-dirver"
 	"database/sql"
 	"github.com/Sirupsen/logrus"
 	"github.com/astaxie/beego/logs"
-	"github.com/streadway/amqp"
+	"github.com/garyburd/redigo/redis"
 	"sync"
 	"time"
 )
@@ -41,12 +43,14 @@ var (
 	drivers       = map[string]DriverType{
 		"mysql":    DRMySQL,
 		"rabbitmq": RabbitMQ,
+		"redis":    DBRedis,
 	}
 	dbBasers = map[DriverType]dbBase{
 		DRMySQL: dblink.NewdbBaseMysql(),
 
 		//TODO rabbitMQ的操作类
-		RabbitMQ: messagelink.NewRabbitMQFactory().Conn,
+		RabbitMQ: messagelink.NewRabbitMQFactory(),
+		DBRedis:  cachelink.NewRedisFactory(),
 	}
 )
 
@@ -86,6 +90,7 @@ type Alias struct {
 	MaxOpenConns int
 	DB           *sql.DB
 	RB           *rabbitmq_dirver.ChannelPool
+	RD           redis.Conn
 	DbBaser      dbBase
 	TZ           *time.Location
 	Engine       string
@@ -110,10 +115,12 @@ func defaultDZ(a *Alias) {
 
 //TODO 每个存储介质的连接都需要经过三个函数，addAliasWithDB,AddAliasWithDB,RegisterDataBase。
 
-func addAliasWithDB(aliasName string, driverName string, db *sql.DB, rb *rabbitmq_dirver.ChannelPool) (al *Alias) {
+func addAliasWithDB(aliasName string, driverName string, db *sql.DB, rb *rabbitmq_dirver.ChannelPool, rd redis.Conn) (al *Alias) {
 	al = new(Alias)
 	al.Name = aliasName
 	al.DB = db
+	al.RB = rb
+	al.RD = rd
 
 	if dr, ok := drivers[driverName]; ok {
 		al.Driver = dr
@@ -125,8 +132,8 @@ func addAliasWithDB(aliasName string, driverName string, db *sql.DB, rb *rabbitm
 	return
 }
 
-func AddAliasWithDB(aliasName string, driverName string, db *sql.DB, rb *rabbitmq_dirver.ChannelPool) (al *Alias) {
-	al = addAliasWithDB(aliasName, driverName, db, rb)
+func AddAliasWithDB(aliasName string, driverName string, db *sql.DB, rb *rabbitmq_dirver.ChannelPool, rd redis.Conn) (al *Alias) {
+	al = addAliasWithDB(aliasName, driverName, db, rb, rd)
 	return
 }
 
@@ -137,10 +144,13 @@ func RegisterDataBase(aliasName string, driverName string, dbRoute string, param
 		err error
 		db  *sql.DB
 		rb  *rabbitmq_dirver.ChannelPool
+		rd  redis.Conn
 	)
 
 	if driverName == "rabbitmq" {
 		rb, err = rabbitmq_dirver.Open(driverName, dbRoute)
+	} else if driverName == "redis" {
+		rd, err = redis_dirver.Open(driverName, dbRoute)
 	} else {
 		db, err = sql.Open(driverName, dbRoute)
 	}
@@ -150,7 +160,7 @@ func RegisterDataBase(aliasName string, driverName string, dbRoute string, param
 		logs.Debug("connect db fail")
 	}
 
-	al := AddAliasWithDB(aliasName, driverName, db, rb)
+	al := AddAliasWithDB(aliasName, driverName, db, rb, rd)
 
 	al.DataSource = dbRoute
 

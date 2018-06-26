@@ -15,13 +15,11 @@ func (self *Manager) Rollback() error {
 	return nil
 }
 
+//用于列出当前原子活动列表
 func (self *Manager) EnlistAction() {
 
 }
 
+//用于取消当前原子活动列表
 func (self *Manager) DelistAction() {
-}
-
-func (self *Manager) CreateTransactionID() (int, error) {
-	return 0, nil
 }
